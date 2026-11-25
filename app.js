@@ -16,6 +16,14 @@ function hexToRgb(hex) {
   const v = parseInt(hex, 16);
   return [(v >> 16) & 255, (v >> 8) & 255, v & 255];
 }
+// cached glow tint (0-255 ints): parsed once per color change instead of
+// twice per frame (updateTrail + draw) — string parsing in the frame loop
+// is pure CPU burn with zero visual difference
+let glowTintR = 255, glowTintG = 158, glowTintB = 80;
+function syncGlowTint() {
+  const t = hexToRgb(S.glowColor || '#FF9E50');
+  glowTintR = t[0]; glowTintG = t[1]; glowTintB = t[2];
+}
 function genColor(i) {
   // golden-ratio hue, vivid, readable on dark stage
   const h = (i * 137.508) % 360;
@@ -349,10 +357,16 @@ class Sim2D {
   updateTrail(dtSec) {
     const hot = this.hot;
     if (!hot.length) return;
-    const f = Math.pow(0.5, dtSec / Math.max(0.05, S.trailTime));
+    // phosphor fade at 30 Hz: the decay envelope is ~1s, so halving the
+    // rate is visually identical but halves per-frame CPU (up to 150k
+    // cells/frame) and halves full-texture re-uploads
+    this._trailAcc = (this._trailAcc || 0) + dtSec;
+    if (this._trailAcc < 1 / 30) return;
+    const dtUse = this._trailAcc;
+    this._trailAcc = 0;
+    const f = Math.pow(0.5, dtUse / Math.max(0.05, S.trailTime));
     const grid = this.grid, cb = this.colorBuf, heat = this.heat, flag = this.hotFlag;
     const pR = this.palR, pG = this.palG, pB = this.palB;
-    const tint = hexToRgb(S.glowColor || '#FF9E50');
     const fl = S.trailFlash;
     for (let k = hot.length - 1; k >= 0; k--) {
       const i = hot[k];
@@ -364,13 +378,13 @@ class Sim2D {
         hot[k] = hot[hot.length - 1]; hot.pop();
       } else {
         heat[i] = h;
-        // blend toward the chosen glow color (visible on dark AND light
+        // blend toward the cached glow tint (visible on dark AND light
         // cells); values are clamped — Uint8Array would wrap on overflow
         let g2 = h * h * fl;
         if (g2 > 1.5) g2 = 1.5;
-        let r = pR[s] + (tint[0] - pR[s]) * g2;
-        let g = pG[s] + (tint[1] - pG[s]) * g2;
-        let b = pB[s] + (tint[2] - pB[s]) * g2;
+        let r = pR[s] + (glowTintR - pR[s]) * g2;
+        let g = pG[s] + (glowTintG - pG[s]) * g2;
+        let b = pB[s] + (glowTintB - pB[s]) * g2;
         cb[o] = r > 255 ? 255 : r < 0 ? 0 : r;
         cb[o + 1] = g > 255 ? 255 : g < 0 ? 0 : g;
         cb[o + 2] = b > 255 ? 255 : b < 0 ? 0 : b;
@@ -479,8 +493,7 @@ gl_FragColor=vec4(col,1.);}`;
     gl.uniform1f(this.loc.u_glow, S.fx.glow ? 1 : 0);
     gl.uniform1f(this.loc.u_glowAmt, S.glowStrength2d);
     gl.uniform1f(this.loc.u_glowR, S.glowSpread);
-    const gc = hexToRgb(S.glowColor || '#FF9E50');
-    gl.uniform3f(this.loc.u_glowCol, gc[0] / 255, gc[1] / 255, gc[2] / 255);
+    gl.uniform3f(this.loc.u_glowCol, glowTintR / 255, glowTintG / 255, glowTintB / 255);
     gl.uniform1f(this.loc.u_glowThr, S.glowThr2d);
     gl.uniform1f(this.loc.u_vig, S.fx.vig ? 1 : 0);
     const a0 = sim.ants[0];
@@ -651,6 +664,7 @@ const render3d = {
   instCount: 0, capacity: 0, overCapWarned: false,
   young: new Map(), cooled: new Map(), glowAttr: null, FX: null, composer: null, bloomPass: null,
   _m4: null, _c: null, _hot: null,
+  palCache: [], _nowSec: 0, _glowAcc: 0,
   async ensure() {
     if (this.ready || this.loading) return;
     this.loading = true;
@@ -805,6 +819,21 @@ const render3d = {
     m.material.transparent = op < 0.999;
     m.material.opacity = op;
   },
+  // per-state base colors as THREE.Color, parsed ONCE per rule change.
+  // the sim hot path (setVoxel per step) and the fade loop (per glowing
+  // cell per frame) used to re-parse '#RRGGBB' strings every single time —
+  // tens of thousands of string parses per frame, pure CPU burn
+  refreshPalette() {
+    this.palCache.length = 0;
+    if (!T) return;
+    const cols = sim3d.colors || [];
+    for (let i = 0; i < cols.length; i++) this.palCache[i] = new T.Color(cols[i] || '#ffffff');
+  },
+  baseCol(st) {
+    let c = this.palCache[st];
+    if (!c) { c = new T.Color((sim3d.colors && sim3d.colors[st]) || '#ffffff'); this.palCache[st] = c; }
+    return c;
+  },
   // hot flash color + lead-bee halo follow the shared glow color (×3 HDR)
   refreshHot() {
     const col = S.glowColor || '#FF9E50';
@@ -839,7 +868,7 @@ const render3d = {
     const id = m ? this.cellToInst.get(cell) : undefined;
     if (id !== undefined) {
       // voxels are always full-size; finalizing only restores base color
-      this._c.set(sim3d.colors[sim3d.grid[cell]] || '#ffffff');
+      this._c.copy(this.baseCol(sim3d.grid[cell]));
       m.setColorAt(id, this._c);
       m.instanceColor.needsUpdate = true;
       if (this.glowAttr) { this.glowAttr.setX(id, 0); this.glowAttr.needsUpdate = true; }
@@ -847,7 +876,7 @@ const render3d = {
     // remember=true: record cooldown so instant churn does not re-ignite;
     // after one glow-time the next color change may flash again.
     // remember=false: forget completely.
-    const now = performance.now() / 1000;
+    const now = this._nowSec || performance.now() / 1000;
     if (remember) {
       this.young.delete(cell);
       this.cooled.set(cell, now);
@@ -877,7 +906,7 @@ const render3d = {
     if (!m) return;
     const has = this.cellToInst.get(i);
     if (state !== 0) {
-      this._sc.set(sim3d.colors[state] || '#ffffff');
+      this._sc.copy(this.baseCol(state));
       if (has === undefined) {
         if (this.instCount >= this.capacity) {
           if (!this.overCapWarned) { snack('Voxel cap reached (' + fmtInt(this.capacity) + ') — oldest voxels stay. Clear or use smaller grid.'); this.overCapWarned = true; }
@@ -895,7 +924,10 @@ const render3d = {
         // may re-ignite only after 3× glow-time, so hyper-churn shimmers
         // instead of burning as one solid flame
         if (!quiet && S.cellGlow3d) {
-          const now = performance.now() / 1000;
+          // frame-cached clock: performance.now() per voxel in the sim hot
+          // path costs milliseconds at high step counts — one read per
+          // frame is plenty for second-scale glow timestamps
+          const now = this._nowSec || performance.now() / 1000;
           if (!this.young.has(i)) {
             const cd = this.cooled.get(i);
             if (cd === undefined || now - cd > this.reflashCooldown()) {
@@ -941,7 +973,7 @@ const render3d = {
       // erased: record time so an instant repaint stays calm (cooldown)
       this.young.delete(i);
       if (S.cellGlow3d) {
-        this.cooled.set(i, performance.now() / 1000);
+        this.cooled.set(i, this._nowSec || performance.now() / 1000);
         if (this.cooled.size > 200000) {
           const k = this.cooled.keys().next().value;
           if (k !== undefined) this.cooled.delete(k);
@@ -956,6 +988,7 @@ const render3d = {
   syncDirty() {
     // single linear scan of the dirty-flag array — native-speed, no GC churn
     if (!this.ready || !this.voxelMesh) return;
+    this._nowSec = performance.now() / 1000;
     const d = sim3d.dirty, g = sim3d.grid;
     let any = false;
     for (let i = 0; i < d.length; i++) {
@@ -969,6 +1002,7 @@ const render3d = {
   rebuildAll() {
     if (!this.ready) return;
     this.overCapWarned = false;
+    this.refreshPalette();
     const need = Math.min(350000, sim3d.N ** 3);
     if (!this.voxelMesh || this.capacity !== need) this.allocMesh(need);
     else { this.cellToInst.clear(); this.instToCell = []; this.instCount = 0; this.voxelMesh.count = 0; this.young.clear(); this.cooled.clear(); }
@@ -1023,11 +1057,10 @@ const render3d = {
   },
   recolorAll() {
     if (!this.ready || !this.voxelMesh) return;
-    const c = new T.Color();
+    this.refreshPalette();
     for (let inst = 0; inst < this.instCount; inst++) {
       const cell = this.instToCell[inst];
-      c.set(sim3d.colors[sim3d.grid[cell]] || '#ffffff');
-      this.voxelMesh.setColorAt(inst, c);
+      this.voxelMesh.setColorAt(inst, this.baseCol(sim3d.grid[cell]));
     }
     if (this.voxelMesh.instanceColor) this.voxelMesh.instanceColor.needsUpdate = true;
   },
@@ -1044,7 +1077,7 @@ const render3d = {
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
   },
-  frame() {
+  frame(dtSec = 1 / 60) {
     if (!this.ready) return;
     this.controls.autoRotate = S.spin;
     this.controls.update();
@@ -1058,25 +1091,35 @@ const render3d = {
     // ignite white-hot and cool down to their base color, always full size.
     // only genuinely flashing instances are visited here (cooled ones live
     // in a separate map that costs nothing per frame).
+    // runs at 30 Hz: identical look for a ~1s glow, but halves per-cell CPU
+    // and halves full instanceColor/glow buffer re-uploads to the GPU
     if (S.cellGlow3d && this.young.size && this.voxelMesh) {
-      const now = performance.now() / 1000, F = S.cellGlowTime;
-      const m = this.voxelMesh;
-      let touched = false;
-      for (const [cell, bt] of this.young) {
-        const age = now - bt;
-        if (age >= F) { this.finalizeYoung(cell, true); continue; }
-        const id = this.cellToInst.get(cell);
-        if (id === undefined) { this.young.delete(cell); continue; }
-        this._c.set(sim3d.colors[sim3d.grid[cell]] || '#ffffff');
-        this._c.lerp(this._hot, (1 - age / F) * S.cellFlash);
-        m.setColorAt(id, this._c);
-        // emissive envelope follows the same fade: visible from any angle
-        if (this.glowAttr) this.glowAttr.setX(id, 1 - age / F);
-        touched = true;
-      }
-      if (touched) {
-        if (m.instanceColor) m.instanceColor.needsUpdate = true;
-        if (this.glowAttr) this.glowAttr.needsUpdate = true;
+      this._nowSec = performance.now() / 1000;
+      this._glowAcc = (this._glowAcc || 0) + Math.min(dtSec, 0.1);
+      if (this._glowAcc >= 1 / 30) {
+        this._glowAcc = 0;
+        const now = this._nowSec, F = S.cellGlowTime;
+        const m = this.voxelMesh;
+        const fl = S.cellFlash;
+        let touched = false;
+        // keys()+get: no per-entry array allocation unlike [k,v] destructuring
+        for (const cell of this.young.keys()) {
+          const bt = this.young.get(cell);
+          const age = now - bt;
+          if (age >= F) { this.finalizeYoung(cell, true); continue; }
+          const id = this.cellToInst.get(cell);
+          if (id === undefined) { this.young.delete(cell); continue; }
+          this._c.copy(this.baseCol(sim3d.grid[cell]));
+          this._c.lerp(this._hot, (1 - age / F) * fl);
+          m.setColorAt(id, this._c);
+          // emissive envelope follows the same fade: visible from any angle
+          if (this.glowAttr) this.glowAttr.setX(id, 1 - age / F);
+          touched = true;
+        }
+        if (touched) {
+          if (m.instanceColor) m.instanceColor.needsUpdate = true;
+          if (this.glowAttr) this.glowAttr.needsUpdate = true;
+        }
       }
     }
     if (this.composer && S.bloom) this.composer.render();
@@ -1509,7 +1552,7 @@ function tick(now) {
     renderer2d.draw(sim2d);
     drawOverlay2D();
   } else {
-    render3d.frame();
+    render3d.frame(Math.min(dt, 100) / 1000);
   }
   updateStats();
 }
@@ -1701,6 +1744,7 @@ function wireUI() {
   };
   const onGlowColor = (e) => {
     S.glowColor = e.target.value.toUpperCase();
+    syncGlowTint();
     syncGlowColorUI();
     if (render3d.ready) render3d.refreshHot();
     saveSoon();
@@ -2026,6 +2070,7 @@ async function boot() {
 
   sim2d = new Sim2D(S.size2d);
   sim3d = new Sim3D(S.size3d);
+  syncGlowTint();
   applyRulesToSim2Both();
   resizeCanvases();
   const startMode = h?.mode ?? (savedMode === '3d' ? '3d' : '2d');
