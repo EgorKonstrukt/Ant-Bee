@@ -1,0 +1,441 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ant &amp; Bee — Langton's Ant 2D &amp; 3D Simulator</title>
+<meta name="description" content="High-performance hardware-accelerated Langton's Ant (2D) and Bee (3D) simulator with custom rules. Material Design 2.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&family=Roboto+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+<link rel="stylesheet" href="style.css?v=9">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><rect width='24' height='24' rx='4' fill='%236200EE'/><circle cx='12' cy='12' r='5' fill='white'/><circle cx='12' cy='12' r='2' fill='%236200EE'/></svg>">
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+
+<!-- ===== Top App Bar (M2) ===== -->
+<header class="m2-top-bar">
+  <button class="m2-icon-btn m2-icon-btn--on-primary" id="btnDrawer" title="Toggle panel (H)" aria-label="Toggle panel">
+    <span class="material-icons">menu</span>
+  </button>
+  <div class="m2-top-bar__title-wrap">
+    <div class="m2-top-bar__logo">A<span class="m2-top-bar__logo-amp">&amp;</span>B</div>
+    <div class="m2-top-bar__titles">
+      <div class="m2-top-bar__title">Ant &amp; Bee</div>
+      <div class="m2-top-bar__subtitle">Langton's Ant · 2D &amp; 3D · GPU accelerated</div>
+    </div>
+  </div>
+
+  <!-- Mode tabs -->
+  <div class="m2-tabs" role="tablist" aria-label="Simulation mode">
+    <button class="m2-tab m2-tab--active" id="tab2D" role="tab" aria-selected="true">
+      <span class="material-icons m2-tab__icon">grid_on</span><span>2D Ant</span>
+    </button>
+    <button class="m2-tab" id="tab3D" role="tab" aria-selected="false">
+      <span class="material-icons m2-tab__icon">view_in_ar</span><span>3D Bee</span>
+    </button>
+  </div>
+
+  <div class="m2-top-bar__spacer"></div>
+
+  <div class="m2-perf-chip" id="perfChip" title="Simulation performance">
+    <span class="material-icons">speed</span>
+    <span id="perfText">0 steps/s</span>
+  </div>
+
+  <button class="m2-icon-btn m2-icon-btn--on-primary" id="btnHelp" title="Help & shortcuts" aria-label="Help">
+    <span class="material-icons">help_outline</span>
+  </button>
+  <button class="m2-icon-btn m2-icon-btn--on-primary" id="btnTheme" title="Toggle dark mode" aria-label="Dark mode">
+    <span class="material-icons">dark_mode</span>
+  </button>
+</header>
+
+<div class="m2-layout">
+  <!-- ===== Side panel ===== -->
+  <aside class="m2-drawer" id="drawer">
+    <div class="m2-drawer__scroll">
+
+      <!-- Transport card -->
+      <section class="m2-card">
+        <div class="m2-card__title">
+          <span class="material-icons m2-card__title-icon">play_circle_outline</span>
+          Simulation
+        </div>
+        <div class="m2-transport">
+          <button class="m2-btn m2-btn--contained m2-btn--primary m2-btn--play" id="btnPlay">
+            <span class="material-icons" id="playIcon">play_arrow</span>
+            <span id="playLabel">Run</span>
+          </button>
+          <button class="m2-btn m2-btn--outlined" id="btnStep" title="Single batch (S)">
+            <span class="material-icons">skip_next</span><span>Step</span>
+          </button>
+          <button class="m2-btn m2-btn--outlined" id="btnReset" title="Reset (R)">
+            <span class="material-icons">restart_alt</span><span>Reset</span>
+          </button>
+        </div>
+
+        <label class="m2-slider-label">
+          <span>Speed <b id="speedVal" class="m2-mono">10,000</b> <span class="m2-muted">steps / frame</span></span>
+          <span class="m2-muted m2-mono" id="spsVal">— steps/s</span>
+        </label>
+        <input type="range" class="m2-slider" id="speedSlider" min="0" max="6" step="0.01" value="4">
+        <div class="m2-slider-ticks"><span>1</span><span>100</span><span>10K</span><span>1M</span></div>
+
+        <div class="m2-stats-grid">
+          <div class="m2-stat"><div class="m2-stat__label">Steps</div><div class="m2-stat__value m2-mono" id="statSteps">0</div></div>
+          <div class="m2-stat"><div class="m2-stat__label">FPS</div><div class="m2-stat__value m2-mono" id="statFps">—</div></div>
+          <div class="m2-stat"><div class="m2-stat__label">Cells alive</div><div class="m2-stat__value m2-mono" id="statAlive">0</div></div>
+          <div class="m2-stat"><div class="m2-stat__label">Agents</div><div class="m2-stat__value m2-mono" id="statAnts">1</div></div>
+        </div>
+
+        <div class="m2-switch-row">
+          <label class="m2-switch">
+            <input type="checkbox" id="chkTurbo">
+            <span class="m2-switch__track"><span class="m2-switch__thumb"></span></span>
+            <span class="m2-switch__label">Turbo <span class="m2-muted">(max batches/frame)</span></span>
+          </label>
+        </div>
+      </section>
+
+      <!-- Rules card -->
+      <section class="m2-card">
+        <div class="m2-card__title">
+          <span class="material-icons m2-card__title-icon">rule</span>
+          Rules
+          <span class="m2-chip m2-chip--rule-string m2-mono" id="ruleStringChip" title="Compact rule string">LR</span>
+        </div>
+
+        <label class="m2-field-label" for="presetSelect">Preset</label>
+        <div class="m2-select-wrap">
+          <select class="m2-select" id="presetSelect"></select>
+          <span class="material-icons m2-select__arrow">expand_more</span>
+        </div>
+        <div class="m2-preset-desc m2-muted" id="presetDesc"></div>
+
+        <label class="m2-field-label" for="ruleText">Rule string <span class="m2-muted" id="ruleHint">— L = left, R = right</span></label>
+        <div class="m2-textfield">
+          <input type="text" id="ruleText" class="m2-mono" value="LR" spellcheck="false" autocomplete="off">
+        </div>
+        <div class="m2-field-error" id="ruleError"></div>
+
+        <div class="m2-rules-head">
+          <span class="m2-field-label" style="margin:0">States <span class="m2-muted" id="stateCount"></span></span>
+          <button class="m2-btn m2-btn--text m2-btn--small" id="btnAddState">
+            <span class="material-icons">add</span><span>Add state</span>
+          </button>
+        </div>
+        <div id="rulesList" class="m2-rules"></div>
+        <div class="m2-muted m2-small" style="margin-top:8px;line-height:1.5">
+          Each step: cell advances to the <b>next</b> state, agent turns as that state's arrow says, then moves 1 cell.
+        </div>
+      </section>
+
+      <!-- World card -->
+      <section class="m2-card">
+        <div class="m2-card__title">
+          <span class="material-icons m2-card__title-icon">public</span>
+          World
+        </div>
+
+        <div class="m2-row-2">
+          <div>
+            <label class="m2-field-label" for="gridSize">Grid size</label>
+            <div class="m2-select-wrap">
+              <select class="m2-select" id="gridSize">
+                <option value="128">128</option>
+                <option value="256" selected>256</option>
+                <option value="512">512</option>
+                <option value="1024">1024</option>
+              </select>
+              <span class="material-icons m2-select__arrow">expand_more</span>
+            </div>
+          </div>
+          <div>
+            <label class="m2-field-label" for="toolSelect">Click tool</label>
+            <div class="m2-select-wrap">
+              <select class="m2-select" id="toolSelect">
+                <option value="pan">Pan</option>
+                <option value="paint" selected>Paint</option>
+                <option value="ant">Place agent</option>
+                <option value="erase">Erase</option>
+              </select>
+              <span class="material-icons m2-select__arrow">expand_more</span>
+            </div>
+          </div>
+        </div>
+
+        <div id="paintStateRow" style="margin-top:8px">
+          <label class="m2-field-label">Paint state</label>
+          <div class="m2-paint-states" id="paintStates"></div>
+        </div>
+
+        <div class="m2-switch-list">
+          <label class="m2-switch">
+            <input type="checkbox" id="chkWrap">
+            <span class="m2-switch__track"><span class="m2-switch__thumb"></span></span>
+            <span class="m2-switch__label">Wrap edges <span class="m2-muted">(torus)</span></span>
+          </label>
+          <label class="m2-switch">
+            <input type="checkbox" id="chkGrid" checked>
+            <span class="m2-switch__track"><span class="m2-switch__thumb"></span></span>
+            <span class="m2-switch__label">Show grid lines</span>
+          </label>
+          <label class="m2-switch">
+            <input type="checkbox" id="chkFollow">
+            <span class="m2-switch__track"><span class="m2-switch__thumb"></span></span>
+            <span class="m2-switch__label">Follow agent</span>
+          </label>
+          <label class="m2-switch" id="rowTrails">
+            <input type="checkbox" id="chkTrails" checked>
+            <span class="m2-switch__track"><span class="m2-switch__thumb"></span></span>
+            <span class="m2-switch__label">Show agent marker</span>
+          </label>
+        </div>
+
+        <div class="m2-btn-row">
+          <button class="m2-btn m2-btn--outlined m2-btn--small" id="btnClear">
+            <span class="material-icons">delete_sweep</span><span>Clear cells</span>
+          </button>
+          <button class="m2-btn m2-btn--outlined m2-btn--small" id="btnCenter">
+            <span class="material-icons">center_focus_strong</span><span>Recenter</span>
+          </button>
+        </div>
+        <div class="m2-btn-row">
+          <button class="m2-btn m2-btn--outlined m2-btn--small" id="btnPng">
+            <span class="material-icons">image</span><span>PNG</span>
+          </button>
+          <button class="m2-btn m2-btn--outlined m2-btn--small" id="btnShare">
+            <span class="material-icons">link</span><span>Copy link</span>
+          </button>
+        </div>
+      </section>
+
+      <!-- Effects card -->
+      <section class="m2-card" id="cardFx">
+        <div class="m2-card__title">
+          <span class="material-icons m2-card__title-icon">auto_fix_high</span>
+          Effects
+        </div>
+        <div id="fx2d">
+          <div class="m2-fx-cap">Glow color</div>
+          <div class="m2-color-row">
+            <input type="color" id="glowColor2d" value="#FF9E50">
+            <span class="m2-mono" id="glowColor2dHex">#FF9E50</span>
+          </div>
+          <div class="m2-fx-cap">Bloom</div>
+          <div class="m2-switch-list" style="margin-top:0">
+            <label class="m2-switch">
+              <input type="checkbox" id="chkGlow" checked>
+              <span class="m2-switch__track"><span class="m2-switch__thumb"></span></span>
+              <span class="m2-switch__label">Cell glow</span>
+            </label>
+          </div>
+          <label class="m2-slider-label"><span>Glow strength <b id="glowStrVal" class="m2-mono">1.00</b></span></label>
+          <input type="range" class="m2-slider" id="glowStrSlider" min="0" max="2" step="0.05" value="1">
+          <label class="m2-slider-label"><span>Glow spread <b id="glowSpreadVal" class="m2-mono">1 cell</b></span></label>
+          <input type="range" class="m2-slider" id="glowSpreadSlider" min="1" max="3" step="1" value="1">
+          <label class="m2-slider-label"><span>Glow threshold <b id="glowThrVal" class="m2-mono">0.00</b></span></label>
+          <input type="range" class="m2-slider" id="glowThrSlider" min="0" max="1" step="0.05" value="0">
+          <div class="m2-switch-list">
+            <label class="m2-switch">
+              <input type="checkbox" id="chkAntLight" checked>
+              <span class="m2-switch__track"><span class="m2-switch__thumb"></span></span>
+              <span class="m2-switch__label">Ant light</span>
+            </label>
+          </div>
+          <label class="m2-slider-label"><span>Light radius <b id="antRadiusVal" class="m2-mono">12 cells</b></span></label>
+          <input type="range" class="m2-slider" id="antRadiusSlider" min="4" max="32" step="1" value="12">
+          <div class="m2-fx-cap">Afterglow</div>
+          <div class="m2-switch-list">
+            <label class="m2-switch">
+              <input type="checkbox" id="chkTrail" checked>
+              <span class="m2-switch__track"><span class="m2-switch__thumb"></span></span>
+              <span class="m2-switch__label">Residual glow</span>
+            </label>
+          </div>
+          <label class="m2-slider-label"><span>Glow fade <b id="trailVal" class="m2-mono">1.2s</b></span></label>
+          <input type="range" class="m2-slider" id="trailSlider" min="0.2" max="3" step="0.1" value="1.2">
+          <label class="m2-slider-label"><span>Flash intensity <b id="trailFlashVal" class="m2-mono">1.00</b></span></label>
+          <input type="range" class="m2-slider" id="trailFlashSlider" min="0" max="1.5" step="0.05" value="1">
+          <div class="m2-fx-cap">Frame</div>
+          <div class="m2-switch-list">
+            <label class="m2-switch">
+              <input type="checkbox" id="chkVig" checked>
+              <span class="m2-switch__track"><span class="m2-switch__thumb"></span></span>
+              <span class="m2-switch__label">Vignette</span>
+            </label>
+          </div>
+        </div>
+        <div id="fx3d" hidden>
+          <div class="m2-fx-cap">Glow color</div>
+          <div class="m2-color-row">
+            <input type="color" id="glowColor3d" value="#FF9E50">
+            <span class="m2-mono" id="glowColor3dHex">#FF9E50</span>
+          </div>
+          <div class="m2-fx-cap">Bloom</div>
+          <label class="m2-switch">
+            <input type="checkbox" id="chkBloom" checked>
+            <span class="m2-switch__track"><span class="m2-switch__thumb"></span></span>
+            <span class="m2-switch__label">Bloom <span class="m2-muted">(post-process)</span></span>
+          </label>
+          <label class="m2-slider-label"><span>Bloom strength <b id="bloomVal" class="m2-mono">0.85</b></span></label>
+          <input type="range" class="m2-slider" id="bloomSlider" min="0" max="2" step="0.05" value="0.85">
+          <label class="m2-slider-label"><span>Bloom threshold <b id="bloomThrVal" class="m2-mono">0.60</b></span></label>
+          <input type="range" class="m2-slider" id="bloomThrSlider" min="0" max="1" step="0.05" value="0.6">
+          <label class="m2-slider-label"><span>Bloom radius <b id="bloomRadVal" class="m2-mono">0.60</b></span></label>
+          <input type="range" class="m2-slider" id="bloomRadSlider" min="0" max="1" step="0.05" value="0.6">
+          <div class="m2-fx-cap">Appear glow</div>
+          <label class="m2-switch">
+            <input type="checkbox" id="chkCellGlow" checked>
+            <span class="m2-switch__track"><span class="m2-switch__thumb"></span></span>
+            <span class="m2-switch__label">Cell appear glow</span>
+          </label>
+          <label class="m2-slider-label"><span>Glow time <b id="glowTimeVal" class="m2-mono">1.1s</b></span></label>
+          <input type="range" class="m2-slider" id="glowTimeSlider" min="0.3" max="2.5" step="0.1" value="1.1">
+          <label class="m2-slider-label"><span>Flash intensity <b id="flashVal" class="m2-mono">1.00</b></span></label>
+          <input type="range" class="m2-slider" id="flashSlider" min="0" max="1.2" step="0.05" value="1">
+          <div class="m2-fx-cap">Atmosphere</div>
+          <label class="m2-slider-label"><span>Fog density <b id="fogVal" class="m2-mono">0.011</b></span></label>
+          <input type="range" class="m2-slider" id="fogSlider" min="0" max="0.03" step="0.001" value="0.011">
+          <label class="m2-slider-label"><span>Voxel opacity <b id="opVal" class="m2-mono">0.85</b></span></label>
+          <input type="range" class="m2-slider" id="opSlider" min="0.15" max="1" step="0.05" value="0.85">
+          <label class="m2-switch">
+            <input type="checkbox" id="chkBeeLight" checked>
+            <span class="m2-switch__track"><span class="m2-switch__thumb"></span></span>
+            <span class="m2-switch__label">Bee headlight</span>
+          </label>
+        </div>
+        <div class="m2-muted m2-small" style="line-height:1.5;margin-top:6px">Pure GPU shader effects — zero simulation cost.</div>
+      </section>
+
+      <!-- 3D only card -->
+      <section class="m2-card" id="card3D" hidden>
+        <div class="m2-card__title">
+          <span class="material-icons m2-card__title-icon">view_in_ar</span>
+          3D View
+        </div>
+        <label class="m2-slider-label"><span>Voxel size <b id="voxelScaleVal" class="m2-mono">0.95</b></span></label>
+        <input type="range" class="m2-slider" id="voxelScale" min="0.5" max="1" step="0.01" value="0.95">
+        <div class="m2-switch-list">
+          <label class="m2-switch">
+            <input type="checkbox" id="chkSpin">
+            <span class="m2-switch__track"><span class="m2-switch__thumb"></span></span>
+            <span class="m2-switch__label">Auto-rotate</span>
+          </label>
+          <label class="m2-switch">
+            <input type="checkbox" id="chkWireframe" checked>
+            <span class="m2-switch__track"><span class="m2-switch__thumb"></span></span>
+            <span class="m2-switch__label">Ground grid helper</span>
+          </label>
+        </div>
+        <div class="m2-muted m2-small" style="line-height:1.5">
+          Drag to orbit · wheel to zoom · right-drag to pan. Place bee with the <b>Place agent</b> tool or double-click a voxel.
+        </div>
+      </section>
+
+      <!-- IO card -->
+      <section class="m2-card">
+        <div class="m2-card__title">
+          <span class="material-icons m2-card__title-icon">save</span>
+          Save / Load
+        </div>
+        <div class="m2-btn-row">
+          <button class="m2-btn m2-btn--outlined m2-btn--small" id="btnExport">
+            <span class="material-icons">file_download</span><span>Export JSON</span>
+          </button>
+          <button class="m2-btn m2-btn--outlined m2-btn--small" id="btnImport">
+            <span class="material-icons">file_upload</span><span>Import</span>
+          </button>
+          <input type="file" id="fileImport" accept="application/json" hidden>
+        </div>
+        <div class="m2-snackbar-anchor"></div>
+      </section>
+
+      <div class="m2-muted m2-small m2-footer">
+        Langton's ant · Turmite generalization · WebGL hardware rendering · Typed-array engine up to ~50M steps/s.<br>
+        Press <b>H</b> to hide panel.
+      </div>
+    </div>
+  </aside>
+
+  <!-- ===== Stage ===== -->
+  <main class="m2-stage">
+    <!-- 2D canvas -->
+    <div class="m2-canvas-wrap" id="wrap2D">
+      <canvas id="gl"></canvas>
+      <canvas id="overlay2d"></canvas>
+
+      <div class="m2-fab-col">
+        <button class="m2-fab m2-fab--primary" id="fabPlay" title="Run / Pause (Space)">
+          <span class="material-icons" id="fabPlayIcon">play_arrow</span>
+        </button>
+        <button class="m2-mini-fab" id="fabStep" title="Step (S)"><span class="material-icons">skip_next</span></button>
+        <button class="m2-mini-fab" id="fabZoomIn" title="Zoom in (+)"><span class="material-icons">add</span></button>
+        <button class="m2-mini-fab" id="fabZoomOut" title="Zoom out (-)"><span class="material-icons">remove</span></button>
+        <button class="m2-mini-fab" id="fabFit" title="Fit (F)"><span class="material-icons">fit_screen</span></button>
+      </div>
+
+      <div class="m2-hud m2-hud--bottom">
+        <span class="m2-hud-chip m2-mono" id="hudPos">ant (128, 128) → N</span>
+        <span class="m2-hud-chip" id="hudHint">drag: pan · wheel: zoom · click: tool</span>
+      </div>
+    </div>
+
+    <!-- 3D canvas -->
+    <div class="m2-canvas-wrap" id="wrap3D" hidden>
+      <canvas id="gl3"></canvas>
+      <div class="m2-fab-col">
+        <button class="m2-fab m2-fab--primary" id="fabPlay3" title="Run / Pause (Space)">
+          <span class="material-icons" id="fabPlayIcon3">play_arrow</span>
+        </button>
+        <button class="m2-mini-fab" id="fabResetCam" title="Reset camera"><span class="material-icons">videocam</span></button>
+      </div>
+      <div class="m2-hud m2-hud--bottom">
+        <span class="m2-hud-chip m2-mono" id="hudBee">bee (32, 32, 32)</span>
+        <span class="m2-hud-chip" id="hudHint3">drag: orbit · wheel: zoom · right-drag: pan</span>
+      </div>
+    </div>
+
+    <!-- Snackbar -->
+    <div class="m2-snackbar" id="snackbar"><span id="snackbarText"></span></div>
+  </main>
+</div>
+
+<!-- Help dialog -->
+<div class="m2-scrim" id="scrim" hidden></div>
+<div class="m2-dialog" id="helpDialog" hidden role="dialog" aria-modal="true" aria-label="Help">
+  <div class="m2-dialog__title">
+    <span class="material-icons">help_outline</span> How it works
+    <button class="m2-icon-btn" id="btnCloseHelp" aria-label="Close"><span class="material-icons">close</span></button>
+  </div>
+  <div class="m2-dialog__body">
+    <p><b>Langton's ant</b> walks on a grid. On a cell of state <i>i</i> it repaints the cell to state <i>i+1</i> (wrapping), turns according to the <b>new</b> state's arrow, then steps forward. Complex highways and chaos emerge from tiny rules like <span class="m2-mono m2-pill">LR</span>.</p>
+    <p><b>2D turns:</b> <span class="m2-mono m2-pill">L</span> left · <span class="m2-mono m2-pill">R</span> right · <span class="m2-mono m2-pill">U</span> U-turn · <span class="m2-mono m2-pill">C</span> continue straight.</p>
+    <p><b>3D bee:</b> flies on a cubic lattice with a heading + an "up". Turns: <span class="m2-mono m2-pill">F</span>orward · <span class="m2-mono m2-pill">B</span>ack · <span class="m2-mono m2-pill">L</span>eft · <span class="m2-mono m2-pill">R</span>ight · <span class="m2-mono m2-pill">U</span>p · <span class="m2-mono m2-pill">D</span>own (relative to the bee).</p>
+    <p><b>Effects:</b> the 2D view is a custom WebGL shader — cell glow, ant light, grid and vignette are toggleable in the Effects card. The 3D view uses exponential fog plus a headlight that follows the lead bee.</p>
+    <p><b>Rules:</b> presets are documented turmites — the 1986 <span class="m2-mono m2-pill">LR</span> highway ant, symmetric <span class="m2-mono m2-pill">LLRR</span>, chaotic <span class="m2-mono m2-pill">RLR</span>, and the 2024 infinite-highway family. 3D presets follow Hamann's 2003 three-dimensional ant definition.</p>
+    <p><b>Engine:</b> flat <span class="m2-mono">Uint8Array</span> grids, branch-free inner loop, batched steps per animation frame, WebGL instancing — no per-step allocation, no DOM churn.</p>
+    <table class="m2-keys">
+      <tr><td class="m2-mono">Space</td><td>Run / pause</td></tr>
+      <tr><td class="m2-mono">S</td><td>Single batch step</td></tr>
+      <tr><td class="m2-mono">R</td><td>Reset</td></tr>
+      <tr><td class="m2-mono">F</td><td>Fit view</td></tr>
+      <tr><td class="m2-mono">H</td><td>Hide panel</td></tr>
+      <tr><td class="m2-mono">1 / 2</td><td>2D / 3D mode</td></tr>
+    </table>
+  </div>
+</div>
+
+<script type="module" src="app.js?v=13"></script>
+</body>
+</html>
